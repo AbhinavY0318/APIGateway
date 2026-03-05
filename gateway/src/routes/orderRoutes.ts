@@ -7,7 +7,7 @@ router.post("/", async (req: Request, res: Response) => {
   try {
     const data = await proxyRequest(
       "POST",
-      `${process.env.ORDER_SERVICE_URL}/orders`,
+      `${process.env.ORDER_SERVICE_PORT}/orders`,
       req.body
     );
 
