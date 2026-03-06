@@ -6,43 +6,58 @@ const router = Router();
 router.get("/", async (req: Request, res: Response) => {
   try {
 
-    // total requests
-    const totalResult = await pool.query(
-      "SELECT COUNT(*) FROM request_logs"
-    );
+    // total requests in last 50 logs
+    const totalResult = await pool.query(`
+      SELECT COUNT(*) FROM (
+        SELECT * FROM request_logs
+        ORDER BY id DESC
+        LIMIT 50
+      ) recent
+    `);
 
     const totalRequests = parseInt(totalResult.rows[0].count);
 
-    // average latency
-    const avgLatencyResult = await pool.query(
-      "SELECT AVG(latency_ms) FROM request_logs"
-    );
+    // average latency of last 50
+    const avgLatencyResult = await pool.query(`
+      SELECT AVG(latency_ms) FROM (
+        SELECT latency_ms FROM request_logs
+        ORDER BY id DESC
+        LIMIT 50
+      ) recent
+    `);
 
     const avgLatency = parseFloat(avgLatencyResult.rows[0].avg);
 
-    // p95 latency
-    const p95Result = await pool.query(
-      `
-      SELECT percentile_cont(0.95) 
+    // p95 latency of last 50
+    const p95Result = await pool.query(`
+      SELECT percentile_cont(0.95)
       WITHIN GROUP (ORDER BY latency_ms)
-      FROM request_logs
-      `
-    );
+      FROM (
+        SELECT latency_ms FROM request_logs
+        ORDER BY id DESC
+        LIMIT 50
+      ) recent
+    `);
 
     const p95Latency = parseFloat(p95Result.rows[0].percentile_cont);
 
-    // requests per second
+    // RPS for last 50 requests
     const rpsResult = await pool.query(`
       SELECT
       COUNT(*) /
       EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at)))
       AS rps
-      FROM request_logs
+      FROM (
+        SELECT created_at FROM request_logs
+        ORDER BY id DESC
+        LIMIT 50
+      ) recent
     `);
 
     const rps = parseFloat(rpsResult.rows[0].rps);
 
     res.json({
+      sample_size: 50,
       total_requests: totalRequests,
       avg_latency_ms: avgLatency,
       p95_latency_ms: p95Latency,
@@ -54,17 +69,28 @@ router.get("/", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to calculate metrics" });
   }
 });
+
+
 router.post("/save", async (req: Request, res: Response) => {
   try {
 
-    const avgResult = await pool.query(
-      "SELECT AVG(latency_ms) FROM request_logs"
-    );
+    const avgResult = await pool.query(`
+      SELECT AVG(latency_ms)
+      FROM (
+        SELECT latency_ms FROM request_logs
+        ORDER BY id DESC
+        LIMIT 50
+      ) recent
+    `);
 
     const p95Result = await pool.query(`
       SELECT percentile_cont(0.95)
       WITHIN GROUP (ORDER BY latency_ms)
-      FROM request_logs
+      FROM (
+        SELECT latency_ms FROM request_logs
+        ORDER BY id DESC
+        LIMIT 50
+      ) recent
     `);
 
     const rpsResult = await pool.query(`
@@ -72,7 +98,11 @@ router.post("/save", async (req: Request, res: Response) => {
       COUNT(*) /
       EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at)))
       AS rps
-      FROM request_logs
+      FROM (
+        SELECT created_at FROM request_logs
+        ORDER BY id DESC
+        LIMIT 50
+      ) recent
     `);
 
     const avg = avgResult.rows[0].avg;
@@ -92,7 +122,7 @@ router.post("/save", async (req: Request, res: Response) => {
     );
 
     res.json({
-      message: "Metrics snapshot saved",
+      message: "Metrics snapshot saved (last 50 requests)",
       avg,
       p95,
       rps
@@ -103,4 +133,40 @@ router.post("/save", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to save metrics" });
   }
 });
+router.get("/dashboard", async (req: Request, res: Response) => {
+  try {
+
+    const result = await pool.query(`
+    SELECT
+COUNT(*) AS total_requests,
+
+COALESCE(AVG(latency_ms),0) AS avg_latency,
+
+COALESCE(
+percentile_cont(0.95)
+WITHIN GROUP (ORDER BY latency_ms),0
+) AS p95_latency,
+
+COALESCE(
+COUNT(*) FILTER (WHERE cache_hit = true) * 100.0 /
+NULLIF(COUNT(*),0),0
+) AS cache_hit_rate,
+
+COALESCE(
+COUNT(*) FILTER (WHERE rate_limited = true) * 100.0 /
+NULLIF(COUNT(*),0),0
+) AS rate_limited_percentage
+
+FROM request_logs
+WHERE created_at >= NOW() - INTERVAL '30 seconds';
+    `);
+
+    res.json(result.rows[0]);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Dashboard metrics failed" });
+  }
+});
+
 export default router;

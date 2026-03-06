@@ -8,6 +8,9 @@ export const metricsMiddleware = (req: Request, res: Response, next: NextFunctio
     try {
       const latency = Date.now() - start;
 
+      const cacheHit = (req as any).cacheHit || false;
+      const rateLimited = res.statusCode === 429;
+
       await pool.query(
         `INSERT INTO request_logs 
         (route, latency_ms, status_code, cache_hit, rate_limited, logging_mode)
@@ -16,8 +19,8 @@ export const metricsMiddleware = (req: Request, res: Response, next: NextFunctio
           req.originalUrl,
           latency,
           res.statusCode,
-          false, // cache_hit (will implement later)
-          false, // rate_limited (later)
+          cacheHit,
+          rateLimited,
           process.env.LOGGING_MODE || "sync"
         ]
       );

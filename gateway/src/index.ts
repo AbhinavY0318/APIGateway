@@ -4,11 +4,15 @@ import userRoutes from "./routes/userRoutes";
 import orderRoutes from "./routes/orderRoutes";
 import metricsRoutes from "./routes/metricsRoutes"
 import { metricsMiddleware } from "./middleware/metrics";
+import { rateLimiter} from "./middleware/tockenBucket";
+import { cacheMiddleware } from "./middleware/lruCache";
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 app.use(metricsMiddleware);
+app.use(rateLimiter);
+app.use(cacheMiddleware);
 app.use("/users", userRoutes);
 app.use("/orders", orderRoutes);
 app.use("/metrics", metricsRoutes);
